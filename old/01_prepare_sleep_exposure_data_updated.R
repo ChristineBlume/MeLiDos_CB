@@ -139,8 +139,6 @@ required_functions <- c(
   "pick_col",
   "pick_col_optional",
   "as_posix_analysis_tz",
-  "extract_diary_date",
-  "extract_diary_clock_time",
   "combine_date_with_clock_time",
   "assign_sleep_night_time",
   "calc_twb_stull"
@@ -205,11 +203,7 @@ data_list <- modalities %>%
     ~ load_melidos_flat(
       modality_value = .x,
       site_value = site,
-      tz_value = dplyr::if_else(
-        .x == "sleepdiaries",
-        analysis_tz,
-        "UTC"
-      )
+      tz_value = "UTC"
     )
   )
 
@@ -316,8 +310,7 @@ ucr_site_check
 # Prepare sleep diary variables for person-night analyses.
 # This includes:
 # - reconstructing sleep-night timestamps,
-# - preserving the reported diary clock times,
-# - defining wake_date from the diary wake date,
+# - defining wake_date from the reported wake clock time,
 # - defining sleep_date as the day before wake_date,
 # - converting duration variables to minutes,
 # - calculating diary-based sleep efficiency using sleepprep_time.
@@ -327,8 +320,6 @@ ucr_site_check
 #
 # OUTPUT:
 # sleep_diary
-# diary_clock_reconstruction_check
-# diary_clock_reconstruction_summary
 #
 # MAIN DERIVED VARIABLES:
 # wake_date
@@ -348,7 +339,7 @@ ucr_site_check
 # sleep_date is the day before wake_date and is used as the night label.
 #
 # TIME-ZONE LOGIC:
-# Diary times are treated as displayed clock times.
+# Diary times are treated as reported clock times.
 # They are not shifted between time zones.
 #
 # SLEEP EFFICIENCY FORMULA:
@@ -358,13 +349,18 @@ ucr_site_check
 
 sleep_diary <- sleep_diary_raw %>%
   dplyr::mutate(
-    raw_wake_date =
-      extract_diary_date(
-        wake
+    wake_time_tmp =
+      combine_date_with_clock_time(
+        date_value = as.Date(wake, tz = "UTC"),
+        time_source = wake,
+        tz_value = analysis_tz,
+        source_tz = "UTC"
       ),
     
     wake_date =
-      raw_wake_date,
+      as.Date(
+        wake_time_tmp
+      ),
     
     sleep_date =
       wake_date - lubridate::days(1)
@@ -375,7 +371,8 @@ sleep_diary <- sleep_diary_raw %>%
         time_source = sleep,
         sleep_date = sleep_date,
         wake_date = wake_date,
-        tz_value = analysis_tz
+        tz_value = analysis_tz,
+        source_tz = "UTC"
       ),
     
     sleepprep_time =
@@ -383,21 +380,24 @@ sleep_diary <- sleep_diary_raw %>%
         time_source = sleepprep,
         sleep_date = sleep_date,
         wake_date = wake_date,
-        tz_value = analysis_tz
+        tz_value = analysis_tz,
+        source_tz = "UTC"
       ),
     
     wake_time =
       combine_date_with_clock_time(
         date_value = wake_date,
         time_source = wake,
-        tz_value = analysis_tz
+        tz_value = analysis_tz,
+        source_tz = "UTC"
       ),
     
     out_ofbed_time =
       combine_date_with_clock_time(
         date_value = wake_date,
         time_source = out_ofbed,
-        tz_value = analysis_tz
+        tz_value = analysis_tz,
+        source_tz = "UTC"
       )
   ) %>%
   dplyr::mutate(
@@ -437,150 +437,15 @@ sleep_diary <- sleep_diary_raw %>%
       )
   ) %>%
   dplyr::select(
-    -raw_wake_date
+    -wake_time_tmp
   )
 
 # ------------------------------------------------------------
-# STEP 6a: Check diary clock-time reconstruction
+# CHECK: Implausible diary clock times after reconstruction
 # ------------------------------------------------------------
 # PURPOSE:
-# Verify that reconstructed timestamps preserve the displayed diary
-# clock times. This specifically checks for systematic time-zone shifts.
-#
-# INPUT:
-# sleep_diary
-#
-# OUTPUT:
-# diary_clock_reconstruction_check
-# diary_clock_reconstruction_summary
-# ------------------------------------------------------------
-
-diary_clock_reconstruction_check <- sleep_diary %>%
-  dplyr::transmute(
-    Id,
-    site,
-    sleep_date,
-    wake_date,
-    
-    raw_sleepprep_clock =
-      extract_diary_clock_time(
-        sleepprep
-      ),
-    
-    raw_sleep_clock =
-      extract_diary_clock_time(
-        sleep
-      ),
-    
-    raw_wake_clock =
-      extract_diary_clock_time(
-        wake
-      ),
-    
-    raw_out_ofbed_clock =
-      extract_diary_clock_time(
-        out_ofbed
-      ),
-    
-    reconstructed_sleepprep_clock =
-      format(
-        sleepprep_time,
-        format = "%H:%M:%S"
-      ),
-    
-    reconstructed_sleep_clock =
-      format(
-        sleep_start,
-        format = "%H:%M:%S"
-      ),
-    
-    reconstructed_wake_clock =
-      format(
-        wake_time,
-        format = "%H:%M:%S"
-      ),
-    
-    reconstructed_out_ofbed_clock =
-      format(
-        out_ofbed_time,
-        format = "%H:%M:%S"
-      ),
-    
-    sleep_clock_matches =
-      raw_sleep_clock == reconstructed_sleep_clock,
-    
-    sleepprep_clock_matches =
-      raw_sleepprep_clock == reconstructed_sleepprep_clock,
-    
-    wake_clock_matches =
-      raw_wake_clock == reconstructed_wake_clock,
-    
-    out_ofbed_clock_matches =
-      raw_out_ofbed_clock == reconstructed_out_ofbed_clock,
-    
-    sleep_interval_min =
-      as.numeric(
-        difftime(
-          wake_time,
-          sleep_start,
-          units = "mins"
-        )
-      ),
-    
-    sleepprep_to_wake_min =
-      as.numeric(
-        difftime(
-          wake_time,
-          sleepprep_time,
-          units = "mins"
-        )
-      )
-  )
-
-diary_clock_reconstruction_summary <- diary_clock_reconstruction_check %>%
-  dplyr::summarise(
-    n_rows =
-      dplyr::n(),
-    
-    n_sleep_clock_mismatches =
-      sum(!sleep_clock_matches, na.rm = TRUE),
-    
-    n_sleepprep_clock_mismatches =
-      sum(!sleepprep_clock_matches, na.rm = TRUE),
-    
-    n_wake_clock_mismatches =
-      sum(!wake_clock_matches, na.rm = TRUE),
-    
-    n_out_ofbed_clock_mismatches =
-      sum(!out_ofbed_clock_matches, na.rm = TRUE),
-    
-    min_sleep_interval_min =
-      min(sleep_interval_min, na.rm = TRUE),
-    
-    median_sleep_interval_min =
-      median(sleep_interval_min, na.rm = TRUE),
-    
-    max_sleep_interval_min =
-      max(sleep_interval_min, na.rm = TRUE),
-    
-    min_sleepprep_to_wake_min =
-      min(sleepprep_to_wake_min, na.rm = TRUE),
-    
-    median_sleepprep_to_wake_min =
-      median(sleepprep_to_wake_min, na.rm = TRUE),
-    
-    max_sleepprep_to_wake_min =
-      max(sleepprep_to_wake_min, na.rm = TRUE)
-  )
-
-View(diary_clock_reconstruction_summary)
-
-# ------------------------------------------------------------
-# STEP 6b: Check remaining implausible diary clock times
-# ------------------------------------------------------------
-# PURPOSE:
-# Identify sleep and wake times that remain implausible after
-# clock-time reconstruction. This is a data check, not an exclusion.
+# Identify sleep and wake times that are implausible after diary
+# timestamp reconstruction.
 #
 # INPUT:
 # sleep_diary
@@ -612,6 +477,87 @@ implausible_sleep_clock_times <- sleep_diary %>%
   )
 
 View(implausible_sleep_clock_times)
+
+# ------------------------------------------------------------
+# STEP 6a) CHECK: Raw and reconstructed diary clock times
+# ------------------------------------------------------------
+# PURPOSE:
+# Compare raw diary clock times with reconstructed clock times.
+# This helps determine whether the diary variables are already local
+# clock times or whether they were shifted by time-zone conversion.
+#
+# INPUT:
+# sleep_diary
+#
+# OUTPUT:
+# diary_clock_time_check
+# ------------------------------------------------------------
+
+diary_clock_time_check <- sleep_diary %>%
+  dplyr::transmute(
+    Id,
+    site,
+    sleep_date,
+    wake_date,
+    
+    raw_sleepprep =
+      sleepprep,
+    
+    raw_sleep =
+      sleep,
+    
+    raw_wake =
+      wake,
+    
+    raw_out_ofbed =
+      out_ofbed,
+    
+    reconstructed_sleepprep_time =
+      sleepprep_time,
+    
+    reconstructed_sleep_start =
+      sleep_start,
+    
+    reconstructed_wake_time =
+      wake_time,
+    
+    reconstructed_out_ofbed_time =
+      out_ofbed_time,
+    
+    hour_sleepprep =
+      lubridate::hour(sleepprep_time),
+    
+    hour_sleep_start =
+      lubridate::hour(sleep_start),
+    
+    hour_wake_time =
+      lubridate::hour(wake_time),
+    
+    hour_out_ofbed_time =
+      lubridate::hour(out_ofbed_time),
+    
+    sleep_interval_min =
+      as.numeric(
+        difftime(
+          wake_time,
+          sleep_start,
+          units = "mins"
+        )
+      ),
+    
+    sleepprep_to_wake_min =
+      as.numeric(
+        difftime(
+          wake_time,
+          sleepprep_time,
+          units = "mins"
+        )
+      )
+  )
+
+View(
+  diary_clock_time_check
+)
 
 # ------------------------------------------------------------
 # STEP 7: Check sleep-night date reconstruction and durations
