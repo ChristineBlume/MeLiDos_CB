@@ -1,22 +1,22 @@
 # 01_prepare_sleep_exposure_data.R
 
 # ============================================================
-# PREPROCESSING: UCR sleep diary, mEDI, PIM and weather data
+# PREPROCESSING: UCR sleep diary, chest mEDI, wrist PIM and weather data
 # ============================================================
 # PURPOSE:
 # Prepare a person-night dataset for analyses of:
 # - diary-based sleep outcomes,
 # - diary-based sleep efficiency,
-# - daytime and evening mEDI exposure for the following night,
-# - PIM as the primary actimetry candidate,
+# - daytime and evening mEDI exposure from chest-worn light sensors,
+# - wrist-based PIM as the primary actimetry candidate,
 # - optional nightly outdoor temperature and wet-bulb temperature.
 #
 # IMPORTANT:
 # This script is restricted to UCR data only.
 #
 # NOTE ON ACTIMETRY:
-# PIM is prepared here as the primary actimetry candidate.
-# These PIM summaries are not yet GGIR-derived sleep estimates.
+# Wrist PIM is prepared here as the primary actimetry candidate.
+# These wrist-PIM summaries are not GGIR-derived sleep estimates.
 # If raw ActLumus accelerometer files are available, GGIR should be
 # run separately to extract actigraphy-based sleep timing, sleep duration
 # and sleep efficiency.
@@ -172,7 +172,7 @@ if (length(missing_functions) > 0) {
 # This block is intentionally strict:
 # - it overwrites any previous data_list object,
 # - it checks whether each dataset was loaded,
-# - it stops immediately if light_chest is missing.
+# - it stops immediately if light_chest or light_wrist is missing.
 #
 # INPUT:
 # melidosData package
@@ -183,18 +183,21 @@ if (length(missing_functions) > 0) {
 # sleep_diary_raw
 # wearlog_raw
 # light_chest_raw
+# light_wrist_raw
 # loaded_modalities_check
 #
 # DATASETS:
 # sleepdiaries: sleep timing and diary-based sleep outcomes.
 # wearlog:      device wear information.
-# light_chest:  chest-level light data used in the previous HTML analysis.
+# light_chest:  chest-level light data used for mEDI exposure.
+# light_wrist:  wrist-level actimetry data used for PIM-derived sleep.
 # ------------------------------------------------------------
 
 modalities <- c(
   "sleepdiaries",
   "wearlog",
-  "light_chest"
+  "light_chest",
+  "light_wrist"
 )
 
 # Overwrite any previously existing data_list to avoid accidentally using
@@ -240,7 +243,15 @@ print(loaded_modalities_check)
 
 if (!"light_chest" %in% names(data_list)) {
   stop(
-    "light_chest was not loaded. Check loaded_modalities_check.",
+    "light_chest was not loaded. Chest data are required for mEDI exposure.",
+    call. = FALSE
+  )
+}
+
+if (!"light_wrist" %in% names(data_list)) {
+  stop(
+    "light_wrist was not loaded. Wrist data are required for PIM-based actimetry. ",
+    "If the wrist modality has a different name in melidosData, change it in the modalities vector.",
     call. = FALSE
   )
 }
@@ -260,6 +271,11 @@ light_chest_raw <- data_list[["light_chest"]] %>%
     site == "UCR"
   )
 
+light_wrist_raw <- data_list[["light_wrist"]] %>%
+  dplyr::filter(
+    site == "UCR"
+  )
+
 
 # ------------------------------------------------------------
 # STEP 5: Check that only UCR data were loaded
@@ -272,6 +288,7 @@ light_chest_raw <- data_list[["light_chest"]] %>%
 # sleep_diary_raw
 # wearlog_raw
 # light_chest_raw
+# light_wrist_raw
 #
 # OUTPUT:
 # ucr_site_check
@@ -282,22 +299,26 @@ ucr_site_check <- tibble::tibble(
   dataset = c(
     "sleepdiaries",
     "wearlog",
-    "light_chest"
+    "light_chest",
+    "light_wrist"
   ),
   n_rows = c(
     nrow(sleep_diary_raw),
     nrow(wearlog_raw),
-    nrow(light_chest_raw)
+    nrow(light_chest_raw),
+    nrow(light_wrist_raw)
   ),
   n_sites = c(
     dplyr::n_distinct(sleep_diary_raw$site),
     dplyr::n_distinct(wearlog_raw$site),
-    dplyr::n_distinct(light_chest_raw$site)
+    dplyr::n_distinct(light_chest_raw$site),
+    dplyr::n_distinct(light_wrist_raw$site)
   ),
   sites = c(
     paste(unique(sleep_diary_raw$site), collapse = ", "),
     paste(unique(wearlog_raw$site), collapse = ", "),
-    paste(unique(light_chest_raw$site), collapse = ", ")
+    paste(unique(light_chest_raw$site), collapse = ", "),
+    paste(unique(light_wrist_raw$site), collapse = ", ")
   )
 )
 
@@ -928,28 +949,31 @@ View(
 )
 
 # ------------------------------------------------------------
-# STEP 9: Identify mEDI and PIM columns in light_chest
+# STEP 9: Identify mEDI columns in light_chest and PIM columns in light_wrist
 # ------------------------------------------------------------
 # PURPOSE:
-# Identify the date-time column, the mEDI column and the PIM column
-# in the chest-level light data.
+# Identify:
+# - the date-time column and mEDI column in chest-level light data,
+# - the date-time column and PIM column in wrist-level actimetry data.
 #
 # INPUT:
 # light_chest_raw
+# light_wrist_raw
 #
 # OUTPUT:
-# light_datetime_col
+# light_chest_datetime_col
 # medi_col
-# pim_col
+# wrist_datetime_col
+# wrist_pim_col
 # light_variable_check
 # output/preprocessing/02_light_variable_check.csv, optional
 #
-# NOTE:
-# PIM is optional because it may not be included in the currently
-# loaded light_chest dataset.
+# IMPORTANT:
+# mEDI is derived from chest data.
+# PIM-based actimetry is derived from wrist data.
 # ------------------------------------------------------------
 
-light_datetime_col <- pick_col(
+light_chest_datetime_col <- pick_col(
   data = light_chest_raw,
   candidates = c(
     "datetime",
@@ -978,19 +1002,35 @@ medi_col <- pick_col(
   object_name = "light_chest"
 )
 
-pim_col <- pick_col_optional(
-  data = light_chest_raw,
+wrist_datetime_col <- pick_col(
+  data = light_wrist_raw,
+  candidates = c(
+    "datetime",
+    "timestamp",
+    "time",
+    "Time",
+    "date_time",
+    "DateTime"
+  ),
+  pattern = "datetime|timestamp|time",
+  object_name = "light_wrist"
+)
+
+wrist_pim_col <- pick_col(
+  data = light_wrist_raw,
   candidates = c(
     "PIM",
     "pim"
   ),
-  pattern = "^pim$"
+  pattern = "^pim$",
+  object_name = "light_wrist"
 )
 
 light_variable_check <- tibble::tibble(
-  light_datetime_col = light_datetime_col,
+  light_chest_datetime_col = light_chest_datetime_col,
   medi_col = medi_col,
-  pim_col = pim_col
+  wrist_datetime_col = wrist_datetime_col,
+  wrist_pim_col = wrist_pim_col
 )
 
 # Uncomment once the script runs successfully and you want to save checks.
@@ -1003,24 +1043,24 @@ light_variable_check
 
 
 # ------------------------------------------------------------
-# STEP 10: Prepare chest-level light data
+# STEP 10: Prepare chest mEDI data and wrist PIM data
 # ------------------------------------------------------------
 # PURPOSE:
-# Keep only the columns needed for later aggregation:
-# - participant ID,
-# - site,
-# - timestamp,
-# - mEDI,
-# - PIM if available.
+# Prepare two separate data streams:
+# - light_chest: chest-level mEDI data for light exposure.
+# - actimetry_wrist: wrist-level PIM data for actimetry.
 #
 # INPUT:
 # light_chest_raw
-# light_datetime_col
+# light_wrist_raw
+# light_chest_datetime_col
 # medi_col
-# pim_col
+# wrist_datetime_col
+# wrist_pim_col
 #
 # OUTPUT:
 # light_chest
+# actimetry_wrist
 # ------------------------------------------------------------
 
 selected_light_columns <- unique(
@@ -1028,9 +1068,8 @@ selected_light_columns <- unique(
     c(
       "Id",
       "site",
-      light_datetime_col,
-      medi_col,
-      pim_col
+      light_chest_datetime_col,
+      medi_col
     )
   )
 )
@@ -1041,7 +1080,7 @@ light_chest <- light_chest_raw %>%
   ) %>%
   dplyr::rename(
     datetime =
-      dplyr::all_of(light_datetime_col),
+      dplyr::all_of(light_chest_datetime_col),
 
     mEDI =
       dplyr::all_of(medi_col)
@@ -1057,142 +1096,45 @@ light_chest <- light_chest_raw %>%
       as.numeric(mEDI)
   )
 
-if (!is.na(pim_col)) {
-
-  light_chest <- light_chest %>%
-    dplyr::rename(
-      PIM =
-        dplyr::all_of(pim_col)
-    ) %>%
-    dplyr::mutate(
-      PIM =
-        as.numeric(PIM)
+selected_wrist_columns <- unique(
+  stats::na.omit(
+    c(
+      "Id",
+      "site",
+      wrist_datetime_col,
+      wrist_pim_col
     )
-
-} else {
-
-  light_chest <- light_chest %>%
-    dplyr::mutate(
-      PIM =
-        NA_real_
-    )
-
-  message(
-    "No PIM column found in light_chest. PIM aggregation will return missing values."
   )
-}
+)
 
-# # ------------------------------------------------------------
-# # STEP 10a: Inspect available actimetry columns
-# # ------------------------------------------------------------
-# # PURPOSE:
-# # Check whether light_chest_raw contains raw or near-raw
-# # accelerometer channels in addition to PIM.
-# #
-# # INPUT:
-# # light_chest_raw
-# #
-# # OUTPUT:
-# # actimetry_column_check
-# # ------------------------------------------------------------
-# 
-# actimetry_column_check <- tibble::tibble(
-#   column_name =
-#     names(light_chest_raw)
-# ) %>%
-#   dplyr::mutate(
-#     column_name_lower =
-#       stringr::str_to_lower(column_name),
-#     
-#     possible_raw_axis =
-#       stringr::str_detect(
-#         column_name_lower,
-#         "^(x|y|z)$|acc|accel|accelerometer|axis"
-#       ),
-#     
-#     possible_epoch_metric =
-#       stringr::str_detect(
-#         column_name_lower,
-#         "pim|zcm|tat|activity|counts|count"
-#       )
-#   ) %>%
-#   dplyr::filter(
-#     possible_raw_axis |
-#       possible_epoch_metric
-#   )
-# 
-# View(
-#   actimetry_column_check
-# )
-# 
-# # ------------------------------------------------------------
-# # STEP 10b: Summarise candidate actimetry variables
-# # ------------------------------------------------------------
-# # PURPOSE:
-# # Summarise numeric candidate actimetry variables to help decide
-# # whether they are raw acceleration axes or epoch-level movement
-# # summaries.
-# #
-# # INPUT:
-# # light_chest_raw
-# # actimetry_column_check
-# #
-# # OUTPUT:
-# # actimetry_variable_summary
-# # ------------------------------------------------------------
-# 
-# actimetry_candidate_cols <- actimetry_column_check %>%
-#   dplyr::pull(
-#     column_name
-#   )
-# 
-# actimetry_variable_summary <- light_chest_raw %>%
-#   dplyr::select(
-#     dplyr::any_of(actimetry_candidate_cols)
-#   ) %>%
-#   dplyr::select(
-#     where(is.numeric)
-#   ) %>%
-#   tidyr::pivot_longer(
-#     cols =
-#       dplyr::everything(),
-#     names_to =
-#       "variable",
-#     values_to =
-#       "value"
-#   ) %>%
-#   dplyr::group_by(
-#     variable
-#   ) %>%
-#   dplyr::summarise(
-#     n =
-#       dplyr::n(),
-#     
-#     n_missing =
-#       sum(is.na(value)),
-#     
-#     min =
-#       min(value, na.rm = TRUE),
-#     
-#     median =
-#       median(value, na.rm = TRUE),
-#     
-#     max =
-#       max(value, na.rm = TRUE),
-#     
-#     .groups =
-#       "drop"
-#   )
-# 
-# View(
-#   actimetry_variable_summary
-# )
+actimetry_wrist <- light_wrist_raw %>%
+  dplyr::select(
+    dplyr::all_of(selected_wrist_columns)
+  ) %>%
+  dplyr::rename(
+    datetime =
+      dplyr::all_of(wrist_datetime_col),
+
+    PIM =
+      dplyr::all_of(wrist_pim_col)
+  ) %>%
+  dplyr::mutate(
+    datetime =
+      as_posix_analysis_tz(
+        datetime,
+        analysis_tz
+      ),
+
+    PIM =
+      as.numeric(PIM)
+  )
+
 
 # ------------------------------------------------------------
-# STEP 11: Aggregate daytime and evening mEDI
+# STEP 11: Aggregate daytime and evening chest mEDI
 # ------------------------------------------------------------
 # PURPOSE:
-# Aggregate mEDI exposure for each person-night.
+# Aggregate chest-derived mEDI exposure for each person-night.
 #
 # INPUT:
 # light_chest
@@ -1290,13 +1232,13 @@ medi_evening <- tibble::as_tibble(medi_evening)
 
 
 # ------------------------------------------------------------
-# STEP 12: Aggregate PIM during sleep and night windows
+# STEP 12: Aggregate wrist PIM during sleep and night windows
 # ------------------------------------------------------------
 # PURPOSE:
-# Aggregate PIM as the primary actimetry candidate.
+# Aggregate wrist PIM as the primary actimetry candidate.
 #
 # INPUT:
-# light_chest
+# actimetry_wrist
 # sleep_windows
 #
 # OUTPUT:
@@ -1304,7 +1246,7 @@ medi_evening <- tibble::as_tibble(medi_evening)
 # pim_fixed_night
 #
 # IMPORTANT:
-# These are movement summaries, not GGIR-derived sleep estimates.
+# These are wrist movement summaries, not GGIR-derived sleep estimates.
 #
 # WINDOWS:
 # reported sleep:
@@ -1314,7 +1256,16 @@ medi_evening <- tibble::as_tibble(medi_evening)
 #   22:00 to 07:00, based on calendar time.
 # ------------------------------------------------------------
 
-pim_reported_sleep <- light_dt[
+wrist_dt <- data.table::as.data.table(actimetry_wrist)
+
+data.table::setkey(
+  wrist_dt,
+  Id,
+  site,
+  datetime
+)
+
+pim_reported_sleep <- wrist_dt[
   windows_dt,
   on = .(
     Id,
@@ -1352,7 +1303,7 @@ pim_reported_sleep <- light_dt[
   )
 ]
 
-pim_fixed_night <- light_dt[
+pim_fixed_night <- wrist_dt[
   windows_dt,
   on = .(
     Id,
@@ -1397,20 +1348,20 @@ pim_fixed_night <- tibble::as_tibble(pim_fixed_night)
 # STEP 12a: Derive Cole-Kripke-style PIM sleep variables
 # ------------------------------------------------------------
 # PURPOSE:
-# Derive exploratory actigraphy-based sleep variables from PIM.
+# Derive exploratory actigraphy-based sleep variables from wrist PIM.
 #
 # INPUT:
-# light_chest
+# actimetry_wrist
 # sleep_windows
 #
 # OUTPUT:
 # pim_sleep_night
 #
 # IMPORTANT:
-# PIM is available in 10-second epochs. For Cole-Kripke-style
+# Wrist PIM is available in 10-second epochs. For Cole-Kripke-style
 # scoring, PIM is first aggregated to 60-second epochs.
 #
-# These variables are PIM-based actigraphy sleep estimates.
+# These variables are wrist-PIM-based actigraphy sleep estimates.
 # They are not GGIR-derived and not ActStudio-derived.
 #
 # VARIABLES DERIVED:
@@ -1423,7 +1374,20 @@ pim_fixed_night <- tibble::as_tibble(pim_fixed_night)
 # pim_sleep_midpoint
 # ------------------------------------------------------------
 
-pim_60s <- light_chest %>%
+# Thresholds for Cole-Kripke-style wrist-PIM scoring.
+#
+# A lower threshold is used for timing refinement because onset and
+# offset detection depend on identifying transitions between sustained
+# low and high movement.
+#
+# A higher threshold is used for sleep/wake scoring within the selected
+# sleep period because sensitivity checks indicated that the default
+# threshold underestimated sleep duration in these wrist-PIM data.
+
+pim_ck_threshold_timing <- 1.5
+pim_ck_threshold_sleep_amount <- 4.5
+
+pim_60s <- actimetry_wrist %>%
   dplyr::filter(
     !is.na(Id),
     !is.na(site),
@@ -1465,10 +1429,26 @@ pim_60s <- light_chest %>%
     site
   ) %>%
   dplyr::mutate(
-    pim_ck_sleep =
+    pim_ck_sleep_timing =
       score_cole_kripke_60s(
-        PIM_60s
-      )
+        activity =
+          PIM_60s,
+        threshold =
+          pim_ck_threshold_timing
+      ),
+    
+    pim_ck_sleep_amount =
+      score_cole_kripke_60s(
+        activity =
+          PIM_60s,
+        threshold =
+          pim_ck_threshold_sleep_amount
+      ),
+    
+    # Keep this legacy name for downstream code.
+    # It refers to the sleep/wake scoring used for sleep amount.
+    pim_ck_sleep =
+      pim_ck_sleep_amount
   ) %>%
   dplyr::ungroup()
 
@@ -1585,6 +1565,8 @@ pim_sleep_epoch_candidates <- data.table::foverlaps(
     datetime_60s,
     PIM_60s,
     n_pim_10s_epochs,
+    pim_ck_sleep_timing,
+    pim_ck_sleep_amount,
     pim_ck_sleep
   ) %>%
   dplyr::arrange(
@@ -1599,9 +1581,9 @@ pim_sleep_epoch_candidates <- data.table::foverlaps(
     sleep_date
   ) %>%
   dplyr::mutate(
-    sustained_sleep_10min =
+    sustained_sleep_10min_timing =
       slider::slide_lgl(
-        pim_ck_sleep,
+        pim_ck_sleep_timing,
         .f = ~ length(.x) == 10 &&
           sum(.x, na.rm = TRUE) >= 9,
         .before = 0,
@@ -1609,9 +1591,9 @@ pim_sleep_epoch_candidates <- data.table::foverlaps(
         .complete = TRUE
       ),
     
-    sustained_wake_10min_forward =
+    sustained_wake_10min_timing =
       slider::slide_lgl(
-        !pim_ck_sleep,
+        !pim_ck_sleep_timing,
         .f = ~ length(.x) == 10 &&
           sum(.x, na.rm = TRUE) >= 8,
         .before = 0,
@@ -1622,160 +1604,115 @@ pim_sleep_epoch_candidates <- data.table::foverlaps(
   dplyr::ungroup()
 
 # ------------------------------------------------------------
-# STEP 12a.2: Derive PIM-based immobility onset and sleep onset
+# STEP 12a.2: Derive diary-anchored PIM-refined sleep onset
 # ------------------------------------------------------------
 # PURPOSE:
-# Derive two onset variables:
-# - pim_immobility_onset_unconstrained:
-#   first sustained low-activity period after sleepprep_time.
-# - pim_sleep_onset:
-#   first sustained low-activity period from diary sleep_start onwards.
+# Derive sleep onset as a diary-anchored PIM refinement.
 #
 # INPUT:
 # pim_sleep_epoch_candidates
 #
 # OUTPUT:
-# pim_immobility_onset_unconstrained
 # pim_sleep_onset
 #
-# RATIONALE:
-# Searching from sleepprep_time can classify quiet wakefulness in bed
-# as sleep. Therefore, the main PIM-derived sleep onset is constrained
-# to begin no earlier than diary-reported sleep_start.
-# ------------------------------------------------------------
-
-pim_immobility_onset_unconstrained <- pim_sleep_epoch_candidates %>%
-  dplyr::filter(
-    sustained_sleep_10min
-  ) %>%
-  dplyr::group_by(
-    Id,
-    site,
-    sleep_date
-  ) %>%
-  dplyr::summarise(
-    pim_immobility_onset_unconstrained =
-      min(
-        datetime_60s,
-        na.rm = TRUE
-      ),
-    .groups = "drop"
-  )
-
-pim_sleep_onset <- pim_sleep_epoch_candidates %>%
-  dplyr::filter(
-    datetime_60s >= sleep_start,
-    sustained_sleep_10min
-  ) %>%
-  dplyr::group_by(
-    Id,
-    site,
-    sleep_date
-  ) %>%
-  dplyr::summarise(
-    pim_sleep_onset =
-      min(
-        datetime_60s,
-        na.rm = TRUE
-      ),
-    .groups = "drop"
-  )
-
-# ------------------------------------------------------------
-# STEP 12a.3: Derive PIM-based sleep offset
-# ------------------------------------------------------------
-# PURPOSE:
-# Derive PIM-based sleep offset as the beginning of the first
-# sustained wake period after PIM-derived sleep onset.
-#
-# INPUT:
-# pim_sleep_epoch_candidates
-# pim_sleep_onset
-#
-# OUTPUT:
-# pim_sleep_offset
+# LOGIC:
+# Search for sustained low movement close to diary-reported sleep_start.
+# If no PIM-based onset is found, fall back to diary sleep_start.
 #
 # IMPORTANT:
-# The previous approach used the last sleep-scored epoch before
-# out_ofbed_time. This can bias sleep offset later if participants
-# lie still after waking.
-#
-# This version defines sleep offset as the first sustained wake
-# period after PIM-derived sleep onset.
+# This is not a fully independent PIM-derived sleep onset. It is a
+# PIM-refined diary-anchored estimate.
 # ------------------------------------------------------------
 
-pim_sleep_offset <- pim_sleep_epoch_candidates %>%
-  dplyr::left_join(
-    pim_sleep_onset,
-    by = c(
-      "Id",
-      "site",
-      "sleep_date"
-    )
-  ) %>%
-  dplyr::filter(
-    !is.na(pim_sleep_onset),
-    datetime_60s > pim_sleep_onset
-  ) %>%
+pim_sleep_onset <- pim_sleep_epoch_candidates %>%
   dplyr::group_by(
     Id,
     site,
     sleep_date
   ) %>%
   dplyr::summarise(
-    pim_sleep_offset_detected =
+    sleep_start =
+      dplyr::first(
+        sleep_start
+      ),
+    
+    pim_sleep_onset_search_start =
+      dplyr::first(
+        sleep_start
+      ) -
+      lubridate::minutes(30),
+    
+    pim_sleep_onset_search_end =
+      dplyr::first(
+        sleep_start
+      ) +
+      lubridate::minutes(90),
+    
+    pim_sleep_onset_detected =
       {
-        offset_candidates <- datetime_60s[
-          sustained_wake_10min_forward
+        onset_ref <- dplyr::first(
+          sleep_start
+        )
+        
+        search_start <- onset_ref -
+          lubridate::minutes(30)
+        
+        search_end <- onset_ref +
+          lubridate::minutes(90)
+        
+        onset_candidates <- datetime_60s[
+          sustained_sleep_10min_timing &
+            datetime_60s >= search_start &
+            datetime_60s <= search_end
         ]
         
-        if (length(offset_candidates) == 0) {
+        if (length(onset_candidates) == 0) {
           as.POSIXct(
             NA,
             tz = analysis_tz
           )
         } else {
-          min(
-            offset_candidates,
-            na.rm = TRUE
-          )
+          onset_candidates[
+            which.min(
+              abs(
+                as.numeric(
+                  difftime(
+                    onset_candidates,
+                    onset_ref,
+                    units = "mins"
+                  )
+                )
+              )
+            )
+          ]
         }
       },
-    
-    out_ofbed_time =
-      dplyr::first(
-        out_ofbed_time
-      ),
-    
-    wake_time =
-      dplyr::first(
-        wake_time
-      ),
     
     .groups = "drop"
   ) %>%
   dplyr::mutate(
-    pim_sleep_offset =
+    pim_sleep_onset =
       dplyr::coalesce(
-        pim_sleep_offset_detected,
-        out_ofbed_time,
-        wake_time
+        pim_sleep_onset_detected,
+        sleep_start
       ),
     
-    pim_sleep_offset_source =
+    pim_sleep_onset_source =
       dplyr::if_else(
-        !is.na(pim_sleep_offset_detected),
-        "first_sustained_wake_10min",
-        "outofbed_or_wake_fallback"
+        !is.na(pim_sleep_onset_detected),
+        "diary_anchored_sustained_sleep_10min",
+        "diary_sleep_start_fallback"
       )
   ) %>%
   dplyr::select(
     Id,
     site,
     sleep_date,
-    pim_sleep_offset,
-    pim_sleep_offset_detected,
-    pim_sleep_offset_source
+    pim_sleep_onset,
+    pim_sleep_onset_detected,
+    pim_sleep_onset_source,
+    pim_sleep_onset_search_start,
+    pim_sleep_onset_search_end
   )
 
 # ------------------------------------------------------------
@@ -1867,6 +1804,16 @@ pim_sleep_night <- pim_sleep_epoch_candidates %>%
         pim_sleep_offset
       ),
     
+    pim_sleep_onset_detected =
+      dplyr::first(
+        pim_sleep_onset_detected
+      ),
+    
+    pim_sleep_onset_source =
+      dplyr::first(
+        pim_sleep_onset_source
+      ),
+    
     pim_sleep_offset_detected =
       dplyr::first(
         pim_sleep_offset_detected
@@ -1875,6 +1822,46 @@ pim_sleep_night <- pim_sleep_epoch_candidates %>%
     pim_sleep_offset_source =
       dplyr::first(
         pim_sleep_offset_source
+      ),
+    
+    pim_sleep_onset_search_start =
+      dplyr::first(
+        pim_sleep_onset_search_start
+      ),
+    
+    pim_sleep_onset_search_end =
+      dplyr::first(
+        pim_sleep_onset_search_end
+      ),
+    
+    pim_sleep_offset_search_start =
+      dplyr::first(
+        pim_sleep_offset_search_start
+      ),
+    
+    pim_sleep_offset_search_end =
+      dplyr::first(
+        pim_sleep_offset_search_end
+      ),
+    
+    pim_sleep_offset_detected =
+      dplyr::first(
+        pim_sleep_offset_detected
+      ),
+    
+    pim_sleep_offset_source =
+      dplyr::first(
+        pim_sleep_offset_source
+      ),
+    
+    pim_sleep_offset_search_start =
+      dplyr::first(
+        pim_sleep_offset_search_start
+      ),
+    
+    pim_sleep_offset_search_end =
+      dplyr::first(
+        pim_sleep_offset_search_end
       ),
     
     pim_sleep_duration_min =
@@ -2033,6 +2020,8 @@ pim_sleep_night <- pim_sleep_epoch_candidates %>%
     pim_sleep_offset,
     pim_sleep_offset_detected,
     pim_sleep_offset_source,
+    pim_sleep_offset_search_start,
+    pim_sleep_offset_search_end,
     pim_sleep_onset_latency_min,
     pim_immobility_onset_vs_diary_sleep_start_min,
     pim_sleep_onset_vs_diary_sleep_start_min,
@@ -2070,6 +2059,9 @@ pim_sleep_scoring_check <- pim_sleep_night %>%
   dplyr::summarise(
     n_nights =
       dplyr::n(),
+    
+    pim_ck_threshold =
+      pim_ck_threshold,
     
     median_sleep_onset_latency_min =
       median(
@@ -2123,13 +2115,315 @@ pim_sleep_scoring_check <- pim_sleep_night %>%
       median(
         pim_mean_scored_wake_epochs,
         na.rm = TRUE
-      )
+      ),
+    
+    median_sleep_period_min =
+      median(
+        pim_sleep_period_min,
+        na.rm = TRUE
+      ),
+    
+    n_offset_detected_by_wake_anchored_sustained_wake =
+      sum(
+        pim_sleep_offset_source == "wake_anchored_sustained_wake_10min",
+        na.rm = TRUE
+      ),
+    
+    n_offset_from_diary_wake_fallback =
+      sum(
+        pim_sleep_offset_source == "diary_wake_fallback",
+        na.rm = TRUE
+      ),
+    
+        pim_ck_threshold_timing =
+      pim_ck_threshold_timing,
+    
+    pim_ck_threshold_sleep_amount =
+      pim_ck_threshold_sleep_amount,
+    
+    n_onset_detected_by_pim =
+      sum(
+        pim_sleep_onset_source == "diary_anchored_sustained_sleep_10min",
+        na.rm = TRUE
+      ),
+    
+    n_onset_from_diary_fallback =
+      sum(
+        pim_sleep_onset_source == "diary_sleep_start_fallback",
+        na.rm = TRUE
+      ),
+    
+    n_offset_detected_by_pim =
+      sum(
+        pim_sleep_offset_source == "diary_anchored_sustained_wake_10min",
+        na.rm = TRUE
+      ),
+    
+    n_offset_from_diary_fallback =
+      sum(
+        pim_sleep_offset_source == "diary_wake_fallback",
+        na.rm = TRUE
+      ),
   )
 
 View(
   pim_sleep_scoring_check
 )
 
+# ------------------------------------------------------------
+# STEP 12b.1: Compare PIM-derived and diary-derived sleep amount
+# ------------------------------------------------------------
+# PURPOSE:
+# Check whether the PIM-based sleep/wake scoring gives plausible
+# sleep duration and efficiency compared with diary reports.
+#
+# INPUT:
+# pim_sleep_night
+# sleep_diary
+#
+# OUTPUT:
+# sleep_amount_discrepancy_check
+#
+# IMPORTANT:
+# This check can be run immediately after STEP 12 because it does
+# not depend on analysis_sleep, which is only created later in STEP 14.
+# ------------------------------------------------------------
+
+sleep_amount_discrepancy_check <- pim_sleep_night %>%
+  dplyr::left_join(
+    sleep_diary %>%
+      dplyr::select(
+        Id,
+        site,
+        sleep_date,
+        sleep_duration_min,
+        sleep_efficiency_diary
+      ),
+    by = c(
+      "Id",
+      "site",
+      "sleep_date"
+    )
+  ) %>%
+  dplyr::summarise(
+    n_nights =
+      dplyr::n(),
+    
+    median_diary_sleep_duration_min =
+      median(
+        sleep_duration_min,
+        na.rm = TRUE
+      ),
+    
+    median_pim_sleep_duration_min =
+      median(
+        pim_sleep_duration_min,
+        na.rm = TRUE
+      ),
+    
+    median_pim_minus_diary_sleep_duration_min =
+      median(
+        pim_sleep_duration_min - sleep_duration_min,
+        na.rm = TRUE
+      ),
+    
+    median_abs_pim_minus_diary_sleep_duration_min =
+      median(
+        abs(
+          pim_sleep_duration_min - sleep_duration_min
+        ),
+        na.rm = TRUE
+      ),
+    
+    median_diary_sleep_efficiency =
+      median(
+        sleep_efficiency_diary,
+        na.rm = TRUE
+      ),
+    
+    median_pim_sleep_efficiency =
+      median(
+        pim_sleep_efficiency,
+        na.rm = TRUE
+      ),
+    
+    median_pim_minus_diary_sleep_efficiency =
+      median(
+        pim_sleep_efficiency - sleep_efficiency_diary,
+        na.rm = TRUE
+      )
+  )
+
+View(
+  sleep_amount_discrepancy_check
+)
+
+# ------------------------------------------------------------
+# STEP 12b.2: Check sensitivity of wrist-PIM sleep/wake threshold
+# ------------------------------------------------------------
+# PURPOSE:
+# Evaluate how strongly PIM-derived sleep duration depends on the
+# Cole-Kripke-style threshold.
+#
+# INPUT:
+# pim_sleep_epoch_candidates
+# sleep_diary
+#
+# OUTPUT:
+# pim_threshold_sensitivity_check
+#
+# IMPORTANT:
+# This is a diagnostic table. It should not be used to tune the
+# threshold blindly until PIM-derived sleep duration matches the diary.
+# ------------------------------------------------------------
+
+pim_threshold_sensitivity_check <- purrr::map_dfr(
+  c(
+    0.75,
+    1.00,
+    1.25,
+    1.50,
+    1.75,
+    2.00,
+    2.50,
+    3.00,
+    4.00,
+    4.25,
+    4.50,
+    4.75,
+    5.00
+  ),
+  function(threshold_value) {
+    
+    scored_tmp <- pim_sleep_epoch_candidates %>%
+      dplyr::arrange(
+        Id,
+        site,
+        sleep_date,
+        datetime_60s
+      ) %>%
+      dplyr::group_by(
+        Id,
+        site
+      ) %>%
+      dplyr::mutate(
+        pim_ck_sleep_tmp =
+          score_cole_kripke_60s(
+            activity =
+              PIM_60s,
+            threshold =
+              threshold_value
+          )
+      ) %>%
+      dplyr::ungroup()
+    
+    night_tmp <- scored_tmp %>%
+      dplyr::filter(
+        datetime_60s >= sleep_start,
+        datetime_60s < wake_time
+      ) %>%
+      dplyr::group_by(
+        Id,
+        site,
+        sleep_date
+      ) %>%
+      dplyr::summarise(
+        pim_sleep_duration_tmp_min =
+          sum(
+            pim_ck_sleep_tmp,
+            na.rm = TRUE
+          ),
+        
+        pim_waso_tmp_min =
+          sum(
+            !pim_ck_sleep_tmp,
+            na.rm = TRUE
+          ),
+        
+        pim_prop_sleep_tmp =
+          mean(
+            pim_ck_sleep_tmp,
+            na.rm = TRUE
+          ),
+        
+        .groups = "drop"
+      ) %>%
+      dplyr::left_join(
+        sleep_diary %>%
+          dplyr::select(
+            Id,
+            site,
+            sleep_date,
+            sleep_duration_min,
+            sleep_efficiency_diary
+          ),
+        by = c(
+          "Id",
+          "site",
+          "sleep_date"
+        )
+      ) %>%
+      dplyr::mutate(
+        pim_minus_diary_sleep_duration_tmp_min =
+          pim_sleep_duration_tmp_min - sleep_duration_min,
+        
+        abs_pim_minus_diary_sleep_duration_tmp_min =
+          abs(
+            pim_minus_diary_sleep_duration_tmp_min
+          )
+      )
+    
+    tibble::tibble(
+      threshold =
+        threshold_value,
+      
+      n_nights =
+        nrow(
+          night_tmp
+        ),
+      
+      median_diary_sleep_duration_min =
+        median(
+          night_tmp$sleep_duration_min,
+          na.rm = TRUE
+        ),
+      
+      median_pim_sleep_duration_min =
+        median(
+          night_tmp$pim_sleep_duration_tmp_min,
+          na.rm = TRUE
+        ),
+      
+      median_pim_minus_diary_sleep_duration_min =
+        median(
+          night_tmp$pim_minus_diary_sleep_duration_tmp_min,
+          na.rm = TRUE
+        ),
+      
+      median_abs_pim_minus_diary_sleep_duration_min =
+        median(
+          night_tmp$abs_pim_minus_diary_sleep_duration_tmp_min,
+          na.rm = TRUE
+        ),
+      
+      median_pim_waso_min =
+        median(
+          night_tmp$pim_waso_tmp_min,
+          na.rm = TRUE
+        ),
+      
+      median_pim_prop_sleep =
+        median(
+          night_tmp$pim_prop_sleep_tmp,
+          na.rm = TRUE
+        )
+    )
+  }
+)
+
+View(
+  pim_threshold_sensitivity_check
+)
 
 # ------------------------------------------------------------
 # STEP 12c: Derive PIM-based interdaily stability
@@ -2155,11 +2449,11 @@ View(
 # x_i   = individual activity value.
 #
 # IMPORTANT:
-# This is calculated from PIM and is not a GGIR-derived rhythm metric.
+# This is calculated from wrist PIM and is not a GGIR-derived rhythm metric.
 # ------------------------------------------------------------
 
 pim_interdaily_stability <- calculate_interdaily_stability(
-  data = light_chest,
+  data = actimetry_wrist,
   id_col = "Id",
   site_col = "site",
   datetime_col = "datetime",
@@ -2357,6 +2651,8 @@ if (exists("weather_hourly")) {
 # medi_evening
 # pim_reported_sleep
 # pim_fixed_night
+# pim_sleep_night
+# pim_interdaily_stability
 # weather_night
 #
 # OUTPUT:
@@ -2888,8 +3184,8 @@ saveRDS(
 # Cleaner R environment.
 #
 # NOTE:
-# data_list, sleep_diary_raw, wearlog_raw and light_chest_raw are
-# intentionally kept in memory for now.
+# data_list, sleep_diary_raw, wearlog_raw, light_chest_raw and
+# light_wrist_raw are intentionally kept in memory for now.
 # ------------------------------------------------------------
 
 rm(
@@ -2900,12 +3196,15 @@ rm(
   missing_functions,
   modalities,
   selected_light_columns,
+  selected_wrist_columns,
   light_dt,
+  wrist_dt,
   windows_dt,
   pim_60s_dt,
   sleep_windows_pim_dt,
   pim_60s,
   pim_sleep_epoch_candidates,
+  pim_immobility_onset_unconstrained,
   pim_sleep_onset,
   pim_sleep_offset
 )

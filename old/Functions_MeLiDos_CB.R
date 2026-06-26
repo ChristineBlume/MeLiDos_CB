@@ -286,32 +286,135 @@ calc_twb_stull <- function(
 
 
 # ------------------------------------------------------------
+# FUNCTION: Extract diary date without time-zone shifting
+# ------------------------------------------------------------
+# PURPOSE:
+# Extract the displayed diary date from a diary date-time variable.
+#
+# INPUT:
+# x: Diary date-time variable.
+#
+# OUTPUT:
+# Date vector.
+#
+# IMPORTANT:
+# This function does not convert the time point to another time zone.
+# It preserves the date as displayed by the diary variable itself.
+# ------------------------------------------------------------
+
+extract_diary_date <- function(
+    x
+) {
+  
+  if (inherits(x, "POSIXt")) {
+    return(
+      as.Date(
+        format(
+          x,
+          format = "%Y-%m-%d"
+        )
+      )
+    )
+  }
+  
+  x_character <- as.character(
+    x
+  )
+  
+  date_value <- stringr::str_extract(
+    x_character,
+    "\\d{4}-\\d{2}-\\d{2}"
+  )
+  
+  as.Date(
+    date_value
+  )
+}
+
+
+# ------------------------------------------------------------
+# FUNCTION: Extract diary clock time without time-zone shifting
+# ------------------------------------------------------------
+# PURPOSE:
+# Extract the displayed clock time from a diary date-time variable.
+#
+# INPUT:
+# x: Diary date-time variable.
+# source_tz: Deprecated argument kept for backward compatibility.
+#
+# OUTPUT:
+# Character vector with clock times in HH:MM:SS format.
+#
+# IMPORTANT:
+# This function deliberately does not use with_tz(), force_tz(),
+# or format(..., tz = ...). It preserves the clock time as displayed
+# by the diary variable itself.
+# ------------------------------------------------------------
+
+extract_diary_clock_time <- function(
+    x,
+    source_tz = NULL
+) {
+  
+  if (inherits(x, "POSIXt")) {
+    
+    clock_time <- format(
+      x,
+      format = "%H:%M:%S"
+    )
+    
+    return(
+      clock_time
+    )
+  }
+  
+  x_character <- as.character(
+    x
+  )
+  
+  clock_time <- stringr::str_extract(
+    x_character,
+    "\\d{1,2}:\\d{2}(:\\d{2})?"
+  )
+  
+  clock_time <- dplyr::if_else(
+    !is.na(clock_time) &
+      stringr::str_count(clock_time, ":") == 1,
+    paste0(clock_time, ":00"),
+    clock_time
+  )
+  
+  clock_time
+}
+
+
+# ------------------------------------------------------------
 # FUNCTION: Combine a date with a diary clock time
 # ------------------------------------------------------------
 # PURPOSE:
 # Reconstruct a POSIXct timestamp by combining:
 # - a calendar date,
-# - the reported clock time from a diary variable.
+# - the displayed clock time from a diary variable.
 #
 # INPUT:
 # date_value: Date used as the calendar date.
 # time_source: Diary variable from which the clock time is extracted.
 # tz_value: Target time zone of the reconstructed timestamp.
-# source_tz: Time zone used only to extract the displayed clock time.
+# source_tz: Deprecated argument kept for backward compatibility.
 #
 # OUTPUT:
 # POSIXct timestamp in the target time zone.
 #
 # IMPORTANT:
-# The reported diary clock time is preserved.
-# No UTC-to-local time shift is applied.
+# The diary clock time is preserved. No time-zone conversion is applied
+# to the reported clock time.
 # ------------------------------------------------------------
 
 combine_date_with_clock_time <- function(
     date_value,
     time_source,
     tz_value,
-    source_tz = "UTC"
+    source_tz = NULL
 ) {
   
   clock_time <- extract_diary_clock_time(
@@ -329,6 +432,7 @@ combine_date_with_clock_time <- function(
   )
 }
 
+
 # ------------------------------------------------------------
 # FUNCTION: Assign sleep-night diary clock times to the correct date
 # ------------------------------------------------------------
@@ -337,11 +441,11 @@ combine_date_with_clock_time <- function(
 # before or after midnight.
 #
 # INPUT:
-# time_source: Diary variable containing the reported clock time.
+# time_source: Diary variable containing the displayed clock time.
 # sleep_date: Date on which the sleep night began.
 # wake_date: Date on which the participant woke up.
 # tz_value: Target time zone of the reconstructed timestamp.
-# source_tz: Time zone used only to extract the displayed clock time.
+# source_tz: Deprecated argument kept for backward compatibility.
 # cutoff_hour: Clock times before this hour are assigned to wake_date.
 #
 # OUTPUT:
@@ -352,8 +456,8 @@ combine_date_with_clock_time <- function(
 # - Times from cutoff_hour onwards, for example 23:15, are assigned to sleep_date.
 #
 # IMPORTANT:
-# The reported diary clock time is preserved.
-# No UTC-to-local time shift is applied.
+# The diary clock time is preserved. No time-zone conversion is applied
+# to the reported clock time.
 # ------------------------------------------------------------
 
 assign_sleep_night_time <- function(
@@ -361,7 +465,7 @@ assign_sleep_night_time <- function(
     sleep_date,
     wake_date,
     tz_value,
-    source_tz = "UTC",
+    source_tz = NULL,
     cutoff_hour = 12
 ) {
   
@@ -394,54 +498,259 @@ assign_sleep_night_time <- function(
 }
 
 # ------------------------------------------------------------
-# FUNCTION: Extract diary clock time without time-zone shifting
+# FUNCTION: Apply Cole-Kripke-style sleep/wake scoring
 # ------------------------------------------------------------
 # PURPOSE:
-# Extract the reported clock time from a diary date-time variable.
+# Score 60-second activity epochs as sleep or wake using a
+# Cole-Kripke-style weighted moving window.
 #
 # INPUT:
-# x:         Diary date-time variable.
-# source_tz: Time zone used only for displaying POSIXct values.
+# activity: Numeric vector of 60-second activity counts.
+# threshold: Sleep/wake threshold for the weighted sleep index.
 #
 # OUTPUT:
-# Character vector with clock times in HH:MM:SS format.
+# Logical vector:
+# TRUE  = scored sleep
+# FALSE = scored wake
 #
 # IMPORTANT:
-# This function does not convert the time point to another time zone.
-# It only extracts the displayed clock time.
+# This implementation is applied to wrist PIM aggregated to
+# 60-second epochs. It is therefore a PIM-based actigraphy estimate,
+# not a GGIR-derived estimate and not an ActStudio export.
+#
+# CLASSIFICATION:
+# sleep_index < threshold  -> sleep
+# sleep_index >= threshold -> wake
 # ------------------------------------------------------------
 
-extract_diary_clock_time <- function(
-    x,
-    source_tz = "UTC"
+score_cole_kripke_60s <- function(
+    activity,
+    threshold = 1
 ) {
   
-  if (inherits(x, "POSIXt")) {
-    
-    return(
-      format(
-        x,
-        format = "%H:%M:%S",
-        tz = source_tz
+  activity_scaled <- as.numeric(activity) / 100
+  
+  activity_scaled <- pmin(
+    activity_scaled,
+    300
+  )
+  
+  activity_scaled[is.na(activity_scaled)] <- 0
+  
+  activity_lag4 <- dplyr::lag(
+    activity_scaled,
+    n = 4,
+    default = 0
+  )
+  
+  activity_lag3 <- dplyr::lag(
+    activity_scaled,
+    n = 3,
+    default = 0
+  )
+  
+  activity_lag2 <- dplyr::lag(
+    activity_scaled,
+    n = 2,
+    default = 0
+  )
+  
+  activity_lag1 <- dplyr::lag(
+    activity_scaled,
+    n = 1,
+    default = 0
+  )
+  
+  activity_lead1 <- dplyr::lead(
+    activity_scaled,
+    n = 1,
+    default = 0
+  )
+  
+  activity_lead2 <- dplyr::lead(
+    activity_scaled,
+    n = 2,
+    default = 0
+  )
+  
+  sleep_index <-
+    0.001 *
+    (
+      106 * activity_lag4 +
+        54 * activity_lag3 +
+        58 * activity_lag2 +
+        76 * activity_lag1 +
+        230 * activity_scaled +
+        74 * activity_lead1 +
+        67 * activity_lead2
+    )
+  
+  sleep_index < threshold
+}
+
+
+# ------------------------------------------------------------
+# FUNCTION: Calculate interdaily stability
+# ------------------------------------------------------------
+# PURPOSE:
+# Calculate classical interdaily stability from an activity time
+# series.
+#
+# INPUT:
+# data: Dataset containing participant, time and activity variables.
+# id_col: Participant identifier.
+# site_col: Site variable.
+# datetime_col: Date-time variable.
+# activity_col: Activity variable.
+# epoch_minutes: Time-bin length in minutes used for the IS formula.
+#
+# OUTPUT:
+# One row per participant and site with:
+# - pim_interdaily_stability,
+# - number of bins,
+# - number of days.
+#
+# FORMULA:
+# IS = n * sum((mean activity per clock bin - grand mean)^2) /
+#      p * sum((activity value - grand mean)^2)
+#
+# where:
+# n = total number of observations,
+# p = number of clock bins per day,
+# x_h = mean activity in clock bin h across days,
+# x_bar = grand mean,
+# x_i = individual activity value.
+# ------------------------------------------------------------
+
+calculate_interdaily_stability <- function(
+    data,
+    id_col = "Id",
+    site_col = "site",
+    datetime_col = "datetime",
+    activity_col = "PIM",
+    epoch_minutes = 60
+) {
+  
+  data_prepared <- data %>%
+    dplyr::filter(
+      !is.na(.data[[id_col]]),
+      !is.na(.data[[site_col]]),
+      !is.na(.data[[datetime_col]]),
+      !is.na(.data[[activity_col]])
+    ) %>%
+    dplyr::mutate(
+      datetime_bin =
+        lubridate::floor_date(
+          .data[[datetime_col]],
+          unit = paste(epoch_minutes, "minutes")
+        ),
+      
+      date_bin =
+        as.Date(
+          datetime_bin
+        ),
+      
+      clock_bin =
+        lubridate::hour(datetime_bin) * 60 +
+        lubridate::minute(datetime_bin)
+    ) %>%
+    dplyr::group_by(
+      .data[[id_col]],
+      .data[[site_col]],
+      datetime_bin,
+      date_bin,
+      clock_bin
+    ) %>%
+    dplyr::summarise(
+      activity_value =
+        mean(
+          .data[[activity_col]],
+          na.rm = TRUE
+        ),
+      .groups = "drop"
+    )
+  
+  clock_bin_means <- data_prepared %>%
+    dplyr::group_by(
+      .data[[id_col]],
+      .data[[site_col]],
+      clock_bin
+    ) %>%
+    dplyr::summarise(
+      clock_bin_mean =
+        mean(
+          activity_value,
+          na.rm = TRUE
+        ),
+      .groups = "drop"
+    )
+  
+  data_with_clock_means <- data_prepared %>%
+    dplyr::left_join(
+      clock_bin_means,
+      by = c(
+        id_col,
+        site_col,
+        "clock_bin"
       )
     )
-  }
   
-  x_character <- as.character(
-    x
-  )
-  
-  clock_time <- stringr::str_extract(
-    x_character,
-    "\\d{1,2}:\\d{2}(:\\d{2})?"
-  )
-  
-  clock_time <- dplyr::if_else(
-    !is.na(clock_time) &
-      stringr::str_count(clock_time, ":") == 1,
-    paste0(clock_time, ":00"),
-    clock_time
-  )
-  
-  clock_time
+  data_with_clock_means %>%
+    dplyr::group_by(
+      .data[[id_col]],
+      .data[[site_col]]
+    ) %>%
+    dplyr::summarise(
+      pim_interdaily_stability =
+        {
+          grand_mean <- mean(
+            activity_value,
+            na.rm = TRUE
+          )
+          
+          n_total <- sum(
+            !is.na(activity_value)
+          )
+          
+          p_bins <- dplyr::n_distinct(
+            clock_bin
+          )
+          
+          numerator <-
+            n_total *
+            sum(
+              (unique(clock_bin_mean) - grand_mean)^2,
+              na.rm = TRUE
+            )
+          
+          denominator <-
+            p_bins *
+            sum(
+              (activity_value - grand_mean)^2,
+              na.rm = TRUE
+            )
+          
+          dplyr::if_else(
+            denominator > 0,
+            numerator / denominator,
+            NA_real_
+          )
+        },
+      
+      n_pim_bins_is =
+        dplyr::n(),
+      
+      n_days_is =
+        dplyr::n_distinct(
+          date_bin
+        ),
+      
+      is_epoch_minutes =
+        epoch_minutes,
+      
+      is_minimum_7_days =
+        n_days_is >= 7,
+      
+      .groups = "drop"
+    )
 }

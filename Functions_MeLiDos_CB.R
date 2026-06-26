@@ -496,3 +496,296 @@ assign_sleep_night_time <- function(
     source_tz = source_tz
   )
 }
+
+# ------------------------------------------------------------
+# FUNCTION: Apply Cole-Kripke-style sleep/wake scoring
+# ------------------------------------------------------------
+# PURPOSE:
+# Score 60-second activity epochs as sleep or wake using a
+# Cole-Kripke-style weighted moving window.
+#
+# INPUT:
+# activity: Numeric vector of 60-second activity counts.
+# threshold: Sleep/wake threshold for the weighted sleep index.
+#
+# OUTPUT:
+# Logical vector:
+# TRUE  = scored sleep
+# FALSE = scored wake
+#
+# IMPORTANT:
+# This implementation is applied to wrist PIM aggregated to
+# 60-second epochs. It is therefore a PIM-based actigraphy estimate,
+# not a GGIR-derived estimate and not an ActStudio export.
+#
+# CLASSIFICATION:
+# sleep_index < threshold  -> sleep
+# sleep_index >= threshold -> wake
+# ------------------------------------------------------------
+
+score_cole_kripke_60s <- function(
+    activity,
+    threshold = 1
+) {
+  
+  activity_scaled <- as.numeric(activity) / 100
+  
+  activity_scaled <- pmin(
+    activity_scaled,
+    300
+  )
+  
+  activity_scaled[is.na(activity_scaled)] <- 0
+  
+  activity_lag4 <- dplyr::lag(
+    activity_scaled,
+    n = 4,
+    default = 0
+  )
+  
+  activity_lag3 <- dplyr::lag(
+    activity_scaled,
+    n = 3,
+    default = 0
+  )
+  
+  activity_lag2 <- dplyr::lag(
+    activity_scaled,
+    n = 2,
+    default = 0
+  )
+  
+  activity_lag1 <- dplyr::lag(
+    activity_scaled,
+    n = 1,
+    default = 0
+  )
+  
+  activity_lead1 <- dplyr::lead(
+    activity_scaled,
+    n = 1,
+    default = 0
+  )
+  
+  activity_lead2 <- dplyr::lead(
+    activity_scaled,
+    n = 2,
+    default = 0
+  )
+  
+  sleep_index <-
+    0.001 *
+    (
+      106 * activity_lag4 +
+        54 * activity_lag3 +
+        58 * activity_lag2 +
+        76 * activity_lag1 +
+        230 * activity_scaled +
+        74 * activity_lead1 +
+        67 * activity_lead2
+    )
+  
+  sleep_index < threshold
+}
+
+
+# ------------------------------------------------------------
+# FUNCTION: Calculate interdaily stability
+# ------------------------------------------------------------
+# PURPOSE:
+# Calculate classical interdaily stability from an activity time
+# series.
+#
+# INPUT:
+# data: Dataset containing participant, time and activity variables.
+# id_col: Participant identifier.
+# site_col: Site variable.
+# datetime_col: Date-time variable.
+# activity_col: Activity variable.
+# epoch_minutes: Time-bin length in minutes used for the IS formula.
+#
+# OUTPUT:
+# One row per participant and site with:
+# - pim_interdaily_stability,
+# - number of bins,
+# - number of days.
+#
+# FORMULA:
+# IS = n * sum((mean activity per clock bin - grand mean)^2) /
+#      p * sum((activity value - grand mean)^2)
+#
+# where:
+# n = total number of observations,
+# p = number of clock bins per day,
+# x_h = mean activity in clock bin h across days,
+# x_bar = grand mean,
+# x_i = individual activity value.
+# ------------------------------------------------------------
+
+calculate_interdaily_stability <- function(
+    data,
+    id_col = "Id",
+    site_col = "site",
+    datetime_col = "datetime",
+    activity_col = "PIM",
+    epoch_minutes = 60
+) {
+  
+  data_prepared <- data %>%
+    dplyr::transmute(
+      Id = .data[[id_col]],
+      site = .data[[site_col]],
+      datetime = .data[[datetime_col]],
+      activity = .data[[activity_col]]
+    ) %>%
+    dplyr::filter(
+      !is.na(Id),
+      !is.na(site),
+      !is.na(datetime),
+      !is.na(activity)
+    ) %>%
+    dplyr::mutate(
+      datetime_bin =
+        lubridate::floor_date(
+          datetime,
+          unit = paste(epoch_minutes, "minutes")
+        ),
+      
+      date_bin =
+        as.Date(
+          datetime_bin
+        ),
+      
+      clock_bin =
+        lubridate::hour(datetime_bin) * 60 +
+        lubridate::minute(datetime_bin)
+    ) %>%
+    dplyr::group_by(
+      Id,
+      site,
+      datetime_bin,
+      date_bin,
+      clock_bin
+    ) %>%
+    dplyr::summarise(
+      activity_value =
+        mean(
+          activity,
+          na.rm = TRUE
+        ),
+      .groups = "drop"
+    )
+  
+  data_with_summary <- data_prepared %>%
+    dplyr::group_by(
+      Id,
+      site
+    ) %>%
+    dplyr::mutate(
+      grand_mean =
+        mean(
+          activity_value,
+          na.rm = TRUE
+        ),
+      n_total =
+        sum(
+          !is.na(activity_value)
+        ),
+      p_bins =
+        dplyr::n_distinct(
+          clock_bin
+        ),
+      n_days_is =
+        dplyr::n_distinct(
+          date_bin
+        )
+    ) %>%
+    dplyr::ungroup()
+  
+  numerator <- data_with_summary %>%
+    dplyr::group_by(
+      Id,
+      site,
+      clock_bin
+    ) %>%
+    dplyr::summarise(
+      clock_bin_mean =
+        mean(
+          activity_value,
+          na.rm = TRUE
+        ),
+      grand_mean =
+        dplyr::first(
+          grand_mean
+        ),
+      n_total =
+        dplyr::first(
+          n_total
+        ),
+      .groups = "drop"
+    ) %>%
+    dplyr::group_by(
+      Id,
+      site
+    ) %>%
+    dplyr::summarise(
+      numerator =
+        dplyr::first(n_total) *
+        sum(
+          (clock_bin_mean - dplyr::first(grand_mean))^2,
+          na.rm = TRUE
+        ),
+      .groups = "drop"
+    )
+  
+  denominator <- data_with_summary %>%
+    dplyr::group_by(
+      Id,
+      site
+    ) %>%
+    dplyr::summarise(
+      denominator =
+        dplyr::first(p_bins) *
+        sum(
+          (activity_value - dplyr::first(grand_mean))^2,
+          na.rm = TRUE
+        ),
+      n_pim_bins_is =
+        dplyr::n(),
+      n_days_is =
+        dplyr::first(
+          n_days_is
+        ),
+      is_epoch_minutes =
+        epoch_minutes,
+      .groups = "drop"
+    )
+  
+  numerator %>%
+    dplyr::left_join(
+      denominator,
+      by = c(
+        "Id",
+        "site"
+      )
+    ) %>%
+    dplyr::mutate(
+      pim_interdaily_stability =
+        dplyr::if_else(
+          denominator > 0,
+          numerator / denominator,
+          NA_real_
+        ),
+      is_minimum_7_days =
+        n_days_is >= 7
+    ) %>%
+    dplyr::select(
+      Id,
+      site,
+      pim_interdaily_stability,
+      n_pim_bins_is,
+      n_days_is,
+      is_epoch_minutes,
+      is_minimum_7_days
+    )
+}
