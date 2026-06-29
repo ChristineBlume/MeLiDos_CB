@@ -789,3 +789,205 @@ calculate_interdaily_stability <- function(
       is_minimum_7_days
     )
 }
+
+# ------------------------------------------------------------
+# FUNCTION: Safely write a CSV file
+# ------------------------------------------------------------
+# PURPOSE:
+# Write a CSV file while avoiding common failures caused by:
+# - missing output directories,
+# - files currently open in Excel,
+# - OneDrive temporarily locking a file.
+#
+# INPUT:
+# data: Data frame or tibble to save.
+# path: Target file path.
+#
+# OUTPUT:
+# Writes the CSV file to path.
+# If writing to path fails, writes a timestamped fallback file
+# in the same folder.
+# ------------------------------------------------------------
+
+write_csv_safely <- function(
+    data,
+    path
+) {
+  
+  # Create the target directory if it does not yet exist.
+  target_dir <- dirname(
+    path
+  )
+  
+  dir.create(
+    target_dir,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+  
+  # Try to write to the requested path first.
+  tryCatch(
+    {
+      readr::write_csv(
+        data,
+        path
+      )
+      
+      message(
+        "CSV written to: ",
+        path
+      )
+    },
+    
+    # If writing fails, create a timestamped fallback file.
+    error = function(e) {
+      
+      fallback_path <- file.path(
+        target_dir,
+        paste0(
+          tools::file_path_sans_ext(
+            basename(
+              path
+            )
+          ),
+          "_",
+          format(
+            Sys.time(),
+            "%Y%m%d_%H%M%S"
+          ),
+          ".csv"
+        )
+      )
+      
+      message(
+        "Could not write CSV to: ",
+        path,
+        "\nReason: ",
+        conditionMessage(
+          e
+        ),
+        "\nTrying fallback path: ",
+        fallback_path
+      )
+      
+      readr::write_csv(
+        data,
+        fallback_path
+      )
+      
+      message(
+        "CSV written to fallback path: ",
+        fallback_path
+      )
+    }
+  )
+  
+  invisible(
+    path
+  )
+}
+
+# ------------------------------------------------------------
+# FUNCTION: Safely write an Excel file
+# ------------------------------------------------------------
+# PURPOSE:
+# Write an Excel file while avoiding common failures caused by:
+# - missing output directories,
+# - files currently open in Excel,
+# - OneDrive temporarily locking a file.
+#
+# INPUT:
+# data: Data frame or tibble to save.
+# path: Target Excel file path.
+#
+# OUTPUT:
+# Writes the Excel file to path.
+# If writing to path fails, writes a timestamped fallback file
+# in the same folder.
+# ------------------------------------------------------------
+
+write_xlsx_safely <- function(
+    data,
+    path
+) {
+  
+  # Create the target directory if it does not yet exist.
+  target_dir <- dirname(
+    path
+  )
+  
+  dir.create(
+    target_dir,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+  
+  # Try to write to the requested path first.
+  tryCatch(
+    {
+      openxlsx::write.xlsx(
+        x =
+          data,
+        file =
+          path,
+        overwrite =
+          TRUE
+      )
+      
+      message(
+        "Excel file written to: ",
+        path
+      )
+    },
+    
+    # If writing fails, create a timestamped fallback file.
+    error = function(e) {
+      
+      fallback_path <- file.path(
+        target_dir,
+        paste0(
+          tools::file_path_sans_ext(
+            basename(
+              path
+            )
+          ),
+          "_",
+          format(
+            Sys.time(),
+            "%Y%m%d_%H%M%S"
+          ),
+          ".xlsx"
+        )
+      )
+      
+      message(
+        "Could not write Excel file to: ",
+        path,
+        "\nReason: ",
+        conditionMessage(
+          e
+        ),
+        "\nTrying fallback path: ",
+        fallback_path
+      )
+      
+      openxlsx::write.xlsx(
+        x =
+          data,
+        file =
+          fallback_path,
+        overwrite =
+          TRUE
+      )
+      
+      message(
+        "Excel file written to fallback path: ",
+        fallback_path
+      )
+    }
+  )
+  
+  invisible(
+    path
+  )
+}

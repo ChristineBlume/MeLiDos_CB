@@ -2957,7 +2957,6 @@ pim_interdaily_stability <- calculate_interdaily_stability(
 )
 
 
-
 # ------------------------------------------------------------
 # STEP 13: Prepare optional nightly weather exposure
 # ------------------------------------------------------------

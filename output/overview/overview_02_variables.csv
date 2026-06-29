@@ -1,0 +1,58 @@
+modality,variable,class,label
+sleepdiaries,Id,character,Record ID
+sleepdiaries,bedtime,POSIXct,What time did you get into bed?
+sleepdiaries,sleepprep,POSIXct,What time did you try to go to sleep?
+sleepdiaries,wake,POSIXct,"What time was your final awakening? i.,e. when did you wake up today?"
+sleepdiaries,out_ofbed,POSIXct,What time did you get out of bed for the day?
+sleepdiaries,sleepdelay,numeric,How long did it take you to fall asleep? Please answer in minutes
+sleepdiaries,awakenings,numeric,"How many times did you wake up, not counting your final awakening?"
+sleepdiaries,awake_duration,numeric,"In total, how long did these awakenings last? Please answer in minutes"
+sleepdiaries,sleepquality,factor,How would you rate the quality of your sleep?
+sleepdiaries,daytype2,factor,Today is...
+sleepdiaries,comments,character,Any comments?
+sleepdiaries,sleep,POSIXct,Sleep onset (calculated)
+sleepdiaries,sleep_duration,difftime,Sleep duration (calculated)
+sleepdiaries,comments_english,character,Comments (English translation)
+wearlog,Id,character,Record ID
+wearlog,start,POSIXct,Start datetime of the state
+wearlog,state,character,Wearlog state
+wearlog,duration,difftime,Duration of the state
+wearlog,end,POSIXct,End datetime of the state
+wearlog,wearlog_event,factor,Description of the starting event
+wearlog,reason,factor,What is prompting you to remove the light glasses?
+wearlog,wearlog_type,factor,Logging a current or past event
+wearlog,radius,character,Please specify broadly where you are located during this time (e.g. name of the town/city)
+wearlog,wearlog_bp,numeric,Did you press the button on the light glasses?
+wearlog,wearlog_bag,numeric,Are the light glasses in the black bag we provided you with?
+wearlog,wearlog_place,character,"Please describe where you placed the light glasses (e.g. on kitchen table, in backpack, in drawer)."
+wearlog,wearlog_motion,numeric,"Are the light glasses in motion (e.g.: in your backpack as you bike, in your pocket, on the bus)?"
+wearlog,wearlog_place_english,character,Placement of the light glasses
+light_chest,Id,character,NA
+light_chest,file.name,character,NA
+light_chest,Datetime,POSIXct,NA
+light_chest,is.implicit,logical,NA
+light_chest,EVENT,numeric,NA
+light_chest,TEMPERATURE,numeric,NA
+light_chest,ORIENTATION,numeric,NA
+light_chest,PIM,numeric,NA
+light_chest,PIMn,numeric,NA
+light_chest,TAT,numeric,NA
+light_chest,TATn,numeric,NA
+light_chest,ZCM,numeric,NA
+light_chest,ZCMn,numeric,NA
+light_chest,LIGHT,numeric,NA
+light_chest,IR.LIGHT,numeric,NA
+light_chest,CAP_SENS_1,numeric,NA
+light_chest,CAP_SENS_2,numeric,NA
+light_chest,F1,numeric,NA
+light_chest,F2,numeric,NA
+light_chest,F3,numeric,NA
+light_chest,F4,numeric,NA
+light_chest,F5,numeric,NA
+light_chest,F6,numeric,NA
+light_chest,F7,numeric,NA
+light_chest,F8,numeric,NA
+light_chest,MEDI,numeric,NA
+light_chest,CLEAR,numeric,NA
+light_chest,STATE,numeric,NA
+light_chest,position,character,NA

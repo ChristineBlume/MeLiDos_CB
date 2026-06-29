@@ -1,0 +1,4 @@
+modality,n_rows,n_cols,has_site,has_id,n_sites,n_ids
+sleepdiaries,267,14,FALSE,TRUE,NA,39
+wearlog,510,14,FALSE,TRUE,NA,39
+light_chest,2695680,29,FALSE,TRUE,NA,39

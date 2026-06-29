@@ -1,0 +1,4 @@
+n_weather_records_night,weather_hours_night,nocturnal_weather_qc,n_sleep_dates
+2,"0, 23",insufficient,1
+8,"0, 1, 2, 3, 4, 5, 6, 7",sufficient,1
+9,"0, 1, 2, 3, 4, 5, 6, 7, 23",sufficient,106
