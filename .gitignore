@@ -1,0 +1,20 @@
+# R / RStudio
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# Data
+data/raw/
+data/processed/
+
+# Preprocessing and statistical outputs
+output/preprocessing/
+output/statistical_analysis/
+
+# Model objects
+*.rds
+*.RData
+
+# Temporary Office files
+~$*

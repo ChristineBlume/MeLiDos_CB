@@ -44,6 +44,7 @@
 # OUTPUT:
 # Packages are installed if missing and loaded into the session.
 # ------------------------------------------------------------
+setwd("C:/Users/chris/OneDrive/Documents/GitHub/MeLiDos_CB")
 
 packages_needed <- c(
   "melidosData",
@@ -3837,35 +3838,35 @@ write_csv_safely(
   data =
     weather_nocturnal_hourly,
   path =
-    "GitHub/MeLiDos_CB/output/preprocessing/09a_weather_nocturnal_23_07_hourly.csv"
+    "output/preprocessing/09a_weather_nocturnal_23_07_hourly.csv"
 )
 
 write_csv_safely(
   data =
     weather_night,
   path =
-    "GitHub/MeLiDos_CB/output/preprocessing/09_weather_night_summary.csv"
+    "output/preprocessing/09_weather_night_summary.csv"
 )
 
 write_csv_safely(
   data =
     weather_night_by_date,
   path =
-    "GitHub/MeLiDos_CB/output/preprocessing/09b_weather_night_by_date.csv"
+    "output/preprocessing/09b_weather_night_by_date.csv"
 )
 
 write_csv_safely(
   data =
     weather_night_check,
   path =
-    "GitHub/MeLiDos_CB/output/preprocessing/10_weather_night_check.csv"
+    "output/preprocessing/10_weather_night_check.csv"
 )
 
 write_csv_safely(
   data =
     weather_hour_pattern_check,
   path =
-    "GitHub/MeLiDos_CB/output/preprocessing/10a_weather_hour_pattern_check.csv"
+    "output/preprocessing/10a_weather_hour_pattern_check.csv"
 )
 
 View(
